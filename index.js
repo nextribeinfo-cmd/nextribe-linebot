@@ -20,8 +20,12 @@ app.post('/webhook', async (req, res) => {
   const events = req.body.events || [];
   for (const event of events) {
     if (event.type === 'message' && event.message.type === 'text') {
-      const result = await parseAndAddSchedule(event.message.text);
-      await replyMessage(event.replyToken, result);
+      try {
+        const result = await parseAndAddSchedule(event.message.text);
+        await replyMessage(event.replyToken, result);
+      } catch (err) {
+        console.error('webhook error:', err.message);
+      }
     }
   }
 });
@@ -47,7 +51,6 @@ async function parseAndAddSchedule(message) {
     });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // スタッフの行番号を取得
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${month}月!A1:A20`,
@@ -67,7 +70,7 @@ async function parseAndAddSchedule(message) {
       const days = match[1].replace(/\.$/, '').split('.').map(Number).filter(d => d >= 1 && d <= 31);
       const location = match[2].trim();
       days.forEach(day => {
-        const col = String.fromCharCode(64 + day + 2);
+        const col = colIndex(day + 2);
         updates.push({ range: `${month}月!${col}${staffRow}`, values: [[location]] });
         addedDetails.push(`${day}日 → ${location}`);
       });
@@ -87,6 +90,16 @@ async function parseAndAddSchedule(message) {
   }
 
   return `✅ ${foundStaff.name}の${month}月スケジュールを追加！\n\n` + addedDetails.join('\n');
+}
+
+function colIndex(n) {
+  let s = '';
+  while (n > 0) {
+    n--;
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26);
+  }
+  return s;
 }
 
 async function replyMessage(replyToken, text) {
