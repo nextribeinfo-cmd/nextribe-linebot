@@ -13,6 +13,7 @@ const STAFF = [
   { name: '光冨大輔',   start: 1, end: null },
   { name: '鮎川公彦',   start: 1, end: null },
   { name: '永島大夢',   start: 1, end: null },
+  { name: '上原恵介',   start: 1, end: null },
 ];
 
 // 重複処理防止（同じメッセージIDを2回処理しない）
