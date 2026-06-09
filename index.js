@@ -49,7 +49,7 @@ async function parseAndAddSchedule(message) {
   if (!monthMatch) return '❌ 月が見つかりませんでした。';
   const month = parseInt(monthMatch[1]);
 
-  const afterMonth = message.replace(/^.*?\d+月は?/, '').trim();
+  const afterMonth = message.replace(/^.*?\d+月\D*/, '').trim();
   if (!afterMonth) return '❌ スケジュール内容が見つかりません。';
 
   // 「、,，」と改行の両方で分割
