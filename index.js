@@ -52,8 +52,6 @@ async function parseAndAddSchedule(message) {
   const afterMonth = message.replace(/^.*?\d+月\D*/, '').trim();
   if (!afterMonth) return '❌ スケジュール内容が見つかりません。';
 
-  // 「、,，」と改行の両方で分割
-  const segments = afterMonth.split(/[、,，\n\r]+/);
   let addedDetails = [];
 
   try {
@@ -74,21 +72,20 @@ async function parseAndAddSchedule(message) {
     });
     if (staffRow === -1) return `❌ ${foundStaff.name}の行が見つかりません。`;
 
+    // 「日付+場所」のペアを抽出（区切り文字なしの連続テキストにも対応）
+    const entryRegex = /(\d+(?:\.\d+)*)([^\d,、，\n\r]+)/g;
     const updates = [];
-    segments.forEach(seg => {
-      seg = seg.trim();
-      if (!seg) return;
-      // 先頭の数字（ドット区切り可）+ 残りを場所とみなす
-      const match = seg.match(/^([\d.]+)\s*(.+)$/);
-      if (!match) return;
+    let match;
+    while ((match = entryRegex.exec(afterMonth)) !== null) {
       const days = match[1].replace(/\.$/, '').split('.').map(Number).filter(d => d >= 1 && d <= 31);
       const location = match[2].trim();
+      if (days.length === 0 || !location) continue;
       days.forEach(day => {
         const col = colIndex(day + 2);
         updates.push({ range: `${month}月!${col}${staffRow}`, values: [[location]] });
         addedDetails.push(`${day}日 → ${location}`);
       });
-    });
+    }
 
     if (updates.length === 0) return '❌ スケジュールを読み取れませんでした。\n\n例:\n村田雄哉の6月は6.7イオンモール佐賀大和、8.9.10ブランチ博多';
 
