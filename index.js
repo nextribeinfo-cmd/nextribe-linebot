@@ -15,11 +15,22 @@ const STAFF = [
   { name: '永島大夢',   start: 1, end: null },
 ];
 
+// 重複処理防止（同じメッセージIDを2回処理しない）
+const processedIds = new Set();
+
 app.post('/webhook', async (req, res) => {
   res.status(200).json({ status: 'ok' });
   const events = req.body.events || [];
   for (const event of events) {
     if (event.type === 'message' && event.message.type === 'text') {
+      const msgId = event.message.id;
+      if (processedIds.has(msgId)) continue;
+      processedIds.add(msgId);
+      // メモリ節約のため古いIDを削除（1000件超えたら半分削除）
+      if (processedIds.size > 1000) {
+        const arr = [...processedIds];
+        arr.slice(0, 500).forEach(id => processedIds.delete(id));
+      }
       try {
         const result = await parseAndAddSchedule(event.message.text);
         await replyMessage(event.replyToken, result);
@@ -32,7 +43,7 @@ app.post('/webhook', async (req, res) => {
 
 async function parseAndAddSchedule(message) {
   const foundStaff = STAFF.find(s => message.includes(s.name));
-  if (!foundStaff) return '❌ スタッフ名が見つかりませんでした。\n\n例:\n村田雄哉の6月は6.7イオンモール佐賀大和、8.9.10ブランチ博多';
+  if (!foundStaff) return '❌ スタッフ名が見つかりませんでした。\n\n例:\n村田雄哉の6月は6.7イオンモール佐賀大和、8.9.10ブランチ博多\n\n複数行でも可:\n村田雄哉の6月は\n6.7イオンモール佐賀大和\n8.9.10ブランチ博多';
 
   const monthMatch = message.match(/(\d+)月/);
   if (!monthMatch) return '❌ 月が見つかりませんでした。';
@@ -41,7 +52,8 @@ async function parseAndAddSchedule(message) {
   const afterMonth = message.replace(/^.*?\d+月は?/, '').trim();
   if (!afterMonth) return '❌ スケジュール内容が見つかりません。';
 
-  const segments = afterMonth.split(/[、,，]/);
+  // 「、,，」と改行の両方で分割
+  const segments = afterMonth.split(/[、,，\n\r]+/);
   let addedDetails = [];
 
   try {
@@ -65,7 +77,9 @@ async function parseAndAddSchedule(message) {
     const updates = [];
     segments.forEach(seg => {
       seg = seg.trim();
-      const match = seg.match(/^([\d.]+)(.+)$/);
+      if (!seg) return;
+      // 先頭の数字（ドット区切り可）+ 残りを場所とみなす
+      const match = seg.match(/^([\d.]+)\s*(.+)$/);
       if (!match) return;
       const days = match[1].replace(/\.$/, '').split('.').map(Number).filter(d => d >= 1 && d <= 31);
       const location = match[2].trim();
@@ -75,6 +89,8 @@ async function parseAndAddSchedule(message) {
         addedDetails.push(`${day}日 → ${location}`);
       });
     });
+
+    if (updates.length === 0) return '❌ スケジュールを読み取れませんでした。\n\n例:\n村田雄哉の6月は6.7イオンモール佐賀大和、8.9.10ブランチ博多';
 
     for (const u of updates) {
       await sheets.spreadsheets.values.update({
