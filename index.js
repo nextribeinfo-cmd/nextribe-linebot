@@ -25,10 +25,15 @@ const STARK_RATES = {
 };
 
 // 村田の店舗別交通費（往復km, 有料道路料金円/往復）
-const MURATA_ROUTES = {
-  'イオンモール佐賀大和': { km: 86, toll: 640, tollName: '三瀬有料道路320円×2' },
-  'ドコモショップ佐賀夢咲': { km: 96, toll: 640, tollName: '三瀬有料道路320円×2' },
-};
+// ds/DS = ドコモショップの略。表記ゆれはキーワードでマッチする
+const MURATA_ROUTES = [
+  { keyword: '佐賀大和', label: 'イオンモール佐賀大和', km: 86, toll: 640, tollName: '三瀬有料道路320円×2' },
+  { keyword: '夢咲',     label: 'ds佐賀夢咲',           km: 96, toll: 640, tollName: '三瀬有料道路320円×2' },
+];
+
+function findRoute(location) {
+  return MURATA_ROUTES.find(r => location.includes(r.keyword));
+}
 
 // 重複処理防止（同じメッセージIDを2回処理しない）
 const processedIds = new Set();
@@ -119,12 +124,12 @@ app.get('/generate-invoice', async (req, res) => {
         let transportTotal = 0;
         const detailParts = [];
         for (const [location, days] of Object.entries(locationCounts)) {
-          const route = MURATA_ROUTES[location];
+          const route = findRoute(location);
           if (route) {
             const gas = route.km * 15;
             const dayCost = gas + route.toll;
             transportTotal += dayCost * days;
-            detailParts.push(`${location}:${route.tollName},ガソリン代${route.km}km×15円=${gas.toLocaleString()}円計${dayCost.toLocaleString()}円×${days}日=${(dayCost * days).toLocaleString()}円`);
+            detailParts.push(`${route.label}:${route.tollName},ガソリン代${route.km}km×15円=${gas.toLocaleString()}円計${dayCost.toLocaleString()}円×${days}日=${(dayCost * days).toLocaleString()}円`);
           } else if (!unknownLocations.includes(location)) {
             unknownLocations.push(location);
           }
