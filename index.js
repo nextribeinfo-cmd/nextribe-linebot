@@ -16,6 +16,20 @@ const STAFF = [
   { name: '上原恵介',   start: 1, end: null },
 ];
 
+// スターク案件請求設定
+const STARK_RATES = {
+  '村田雄哉': 30000,
+  '鮎川公彦': 25000,
+  '永島大夢': 22000,
+  '上原恵介': 20000,
+};
+
+// 村田の店舗別交通費（片道km, 有料道路料金円）
+const MURATA_ROUTES = {
+  'イオンモール佐賀大和': { km: 88, toll: 640 },
+  'ドコモショップ佐賀夢咲': { km: 96, toll: 640 },
+};
+
 // 重複処理防止（同じメッセージIDを2回処理しない）
 const processedIds = new Set();
 
@@ -27,7 +41,6 @@ app.post('/webhook', async (req, res) => {
       const msgId = event.message.id;
       if (processedIds.has(msgId)) continue;
       processedIds.add(msgId);
-      // メモリ節約のため古いIDを削除（1000件超えたら半分削除）
       if (processedIds.size > 1000) {
         const arr = [...processedIds];
         arr.slice(0, 500).forEach(id => processedIds.delete(id));
@@ -40,6 +53,98 @@ app.post('/webhook', async (req, res) => {
       }
     }
   }
+});
+
+// 月末請求書データ生成エンドポイント
+app.get('/generate-invoice', async (req, res) => {
+  // CORS許可（Netlifyからのアクセス用）
+  res.header('Access-Control-Allow-Origin', '*');
+
+  const month = parseInt(req.query.month);
+  if (!month || month < 1 || month > 12) {
+    return res.status(400).json({ error: '月を指定してください (1-12)' });
+  }
+
+  try {
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+    const sheets = google.sheets({ version: 'v4', auth });
+
+    const result = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${month}月!A1:AF20`,
+    });
+    const rows = result.data.values || [];
+
+    const items = [];
+    let murataTransportTotal = 0;
+    const murataTransportLines = [];
+    const unknownLocations = [];
+
+    rows.forEach(row => {
+      const staffName = row[0]?.trim();
+      const rate = STARK_RATES[staffName];
+      if (!rate) return;
+
+      let workDays = 0;
+
+      for (let col = 2; col < row.length; col++) {
+        const location = row[col]?.trim();
+        if (!location) continue;
+        workDays++;
+
+        if (staffName === '村田雄哉') {
+          const day = col - 2;
+          const route = MURATA_ROUTES[location];
+          if (route) {
+            const gas = route.km * 15;
+            const dayCost = gas + route.toll;
+            murataTransportTotal += dayCost;
+            murataTransportLines.push(`${day}日 ${location}：${route.km}km×¥15=${gas.toLocaleString()}円＋有料道路${route.toll.toLocaleString()}円＝${dayCost.toLocaleString()}円`);
+          } else if (!unknownLocations.includes(location)) {
+            unknownLocations.push(location);
+          }
+        }
+      }
+
+      if (workDays > 0) {
+        items.push({
+          name: `[納品分] ${staffName} 稼動費`,
+          qty: workDays,
+          price: rate,
+        });
+      }
+    });
+
+    if (murataTransportTotal > 0) {
+      items.push({
+        name: '[納品分] 村田雄哉 交通費',
+        qty: 1,
+        price: murataTransportTotal,
+      });
+    }
+
+    const transportDetail = murataTransportLines.join('\n') +
+      (unknownLocations.length > 0 ? '\n\n※交通費未計算の勤務先（要確認）：' + unknownLocations.join('、') : '');
+
+    res.json({
+      month,
+      items,
+      transportDetail,
+      unknownLocations,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.options('/generate-invoice', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET');
+  res.sendStatus(200);
 });
 
 async function parseAndAddSchedule(message) {
@@ -73,7 +178,6 @@ async function parseAndAddSchedule(message) {
     });
     if (staffRow === -1) return `❌ ${foundStaff.name}の行が見つかりません。`;
 
-    // 「日付+場所」のペアを抽出（区切り文字なしの連続テキストにも対応）
     const entryRegex = /(\d+(?:\.\d+)*)([^\d,、，\n\r]+)/g;
     const updates = [];
     let match;
