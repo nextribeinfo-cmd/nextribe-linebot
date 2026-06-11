@@ -119,11 +119,14 @@ app.get('/generate-invoice', async (req, res) => {
     });
 
     if (murataTransportTotal > 0) {
+      // 実費は税込相当のため、税抜額に換算して計上（消費税10%が後から加算され実費と一致する）
+      const taxExcluded = Math.round(murataTransportTotal / 1.1);
       items.push({
         name: '[納品分] 村田雄哉 交通費',
         qty: 1,
-        price: murataTransportTotal,
+        price: taxExcluded,
       });
+      murataTransportLines.push(`実費合計 ${murataTransportTotal.toLocaleString()}円（税抜換算 ${taxExcluded.toLocaleString()}円で計上、消費税加算後に実費と一致）`);
     }
 
     const transportDetail = murataTransportLines.join('\n') +
