@@ -24,10 +24,10 @@ const STARK_RATES = {
   '上原恵介': 20000,
 };
 
-// 村田の店舗別交通費（片道km, 有料道路料金円）
+// 村田の店舗別交通費（往復km, 有料道路料金円/往復）
 const MURATA_ROUTES = {
-  'イオンモール佐賀大和': { km: 88, toll: 640 },
-  'ドコモショップ佐賀夢咲': { km: 96, toll: 640 },
+  'イオンモール佐賀大和': { km: 86, toll: 640, tollName: '三瀬有料道路320円×2' },
+  'ドコモショップ佐賀夢咲': { km: 96, toll: 640, tollName: '三瀬有料道路320円×2' },
 };
 
 // 重複処理防止（同じメッセージIDを2回処理しない）
@@ -78,9 +78,10 @@ app.get('/generate-invoice', async (req, res) => {
     });
     const rows = result.data.values || [];
 
+    const year = new Date().getFullYear();
+    const mm = String(month).padStart(2, '0');
     const items = [];
-    let murataTransportTotal = 0;
-    const murataTransportLines = [];
+    const transportParagraphs = [];
     const unknownLocations = [];
 
     rows.forEach(row => {
@@ -88,49 +89,67 @@ app.get('/generate-invoice', async (req, res) => {
       const rate = STARK_RATES[staffName];
       if (!rate) return;
 
+      const surname = staffName.slice(0, 2);
       let workDays = 0;
+      let lastDay = 0;
+      const locationCounts = {}; // 村田用：場所ごとの日数集計
 
       for (let col = 2; col < row.length; col++) {
         const location = row[col]?.trim();
         if (!location) continue;
+        const day = col - 2;
         workDays++;
+        if (day > lastDay) lastDay = day;
 
         if (staffName === '村田雄哉') {
-          const day = col - 2;
+          locationCounts[location] = (locationCounts[location] || 0) + 1;
+        }
+      }
+
+      if (workDays === 0) return;
+
+      const dd = String(lastDay).padStart(2, '0');
+      items.push({
+        name: `[${year}/${mm}/${dd} 納品分] ${surname}イベント稼動費`,
+        qty: workDays,
+        price: rate,
+      });
+
+      if (staffName === '村田雄哉') {
+        let transportTotal = 0;
+        const detailParts = [];
+        for (const [location, days] of Object.entries(locationCounts)) {
           const route = MURATA_ROUTES[location];
           if (route) {
             const gas = route.km * 15;
             const dayCost = gas + route.toll;
-            murataTransportTotal += dayCost;
-            murataTransportLines.push(`${day}日 ${location}：${route.km}km×¥15=${gas.toLocaleString()}円＋有料道路${route.toll.toLocaleString()}円＝${dayCost.toLocaleString()}円`);
+            transportTotal += dayCost * days;
+            detailParts.push(`${location}:${route.tollName},ガソリン代${route.km}km×15円=${gas.toLocaleString()}円計${dayCost.toLocaleString()}円×${days}日=${(dayCost * days).toLocaleString()}円`);
           } else if (!unknownLocations.includes(location)) {
             unknownLocations.push(location);
           }
         }
-      }
-
-      if (workDays > 0) {
+        if (transportTotal > 0) {
+          // 実費は税込相当のため税抜換算で計上（消費税10%加算後に実費と一致）
+          items.push({
+            name: `[${year}/${mm}/${dd} 納品分] 上記交通費`,
+            qty: 1,
+            price: Math.round(transportTotal / 1.1),
+          });
+          transportParagraphs.push(`村田交通費詳細(${detailParts.join(',')})`);
+        }
+      } else {
+        // 他スタッフの交通費は先方請求書ベースで手動入力（税抜額を入れる）
         items.push({
-          name: `[納品分] ${staffName} 稼動費`,
-          qty: workDays,
-          price: rate,
+          name: `[${year}/${mm}/${dd} 納品分] 上記交通費`,
+          qty: 1,
+          price: 0,
         });
       }
     });
 
-    if (murataTransportTotal > 0) {
-      // 実費は税込相当のため、税抜額に換算して計上（消費税10%が後から加算され実費と一致する）
-      const taxExcluded = Math.round(murataTransportTotal / 1.1);
-      items.push({
-        name: '[納品分] 村田雄哉 交通費',
-        qty: 1,
-        price: taxExcluded,
-      });
-      murataTransportLines.push(`実費合計 ${murataTransportTotal.toLocaleString()}円（税抜換算 ${taxExcluded.toLocaleString()}円で計上、消費税加算後に実費と一致）`);
-    }
-
-    const transportDetail = murataTransportLines.join('\n') +
-      (unknownLocations.length > 0 ? '\n\n※交通費未計算の勤務先（要確認）：' + unknownLocations.join('、') : '');
+    const transportDetail = transportParagraphs.join('\n') +
+      (unknownLocations.length > 0 ? '\n\n※村田の交通費未計算の勤務先（要確認）：' + unknownLocations.join('、') : '');
 
     res.json({
       month,
