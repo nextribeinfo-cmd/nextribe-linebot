@@ -14,6 +14,7 @@ const STAFF = [
   { name: '鮎川公彦',   start: 1, end: null },
   { name: '永島大夢',   start: 1, end: null },
   { name: '上原恵介',   start: 1, end: null },
+  { name: '川﨑茉奈',   start: 1, end: null },
 ];
 
 // スターク案件請求設定
