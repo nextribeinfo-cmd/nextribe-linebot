@@ -35,6 +35,13 @@ const STARK_RATES = {
 const MURATA_ROUTES = [
   { keyword: '佐賀大和', label: 'イオンモール佐賀大和', km: 86, toll: 640, tollName: '三瀬有料道路320円×2' },
   { keyword: '夢咲',     label: 'ds佐賀夢咲',           km: 96, toll: 640, tollName: '三瀬有料道路320円×2' },
+  { keyword: '武雄',     label: 'ゆめタウン武雄',       km: 144, toll: 2380, tollName: '高速代,佐賀大和IC-武雄北方IC往復2380円' },
+  { keyword: '荒尾',     label: 'シティモール荒尾',     km: 182, toll: 4420, tollName: '高速代,百道IC-南関IC往復4420円' },
+  { keyword: '須恵',     label: 'スーパーセンタートライアル須恵', km: 30, toll: 0, tollName: '' },
+  { keyword: '東山鹿',   label: '夢マート東山鹿',       km: 200, toll: 5200, tollName: '高速代,野芥IC-菊水IC往復2600円×2' },
+  // 近隣店舗は交通費なし（登録しておくことで「未計算」警告を出さない）
+  { keyword: 'ブランチ博多', label: 'ブランチ博多', km: 0, toll: 0, tollName: '' },
+  { keyword: 'えきマチ',     label: 'えきマチ',     km: 0, toll: 0, tollName: '' },
 ];
 
 function findRoute(location) {
@@ -134,8 +141,12 @@ app.get('/generate-invoice', async (req, res) => {
           if (route) {
             const gas = route.km * 15;
             const dayCost = gas + route.toll;
-            transportTotal += dayCost * days;
-            detailParts.push(`${route.label}:${route.tollName},ガソリン代${route.km}km×15円=${gas.toLocaleString()}円計${dayCost.toLocaleString()}円×${days}日=${(dayCost * days).toLocaleString()}円`);
+            // 交通費0円の近隣店舗は明細に載せない
+            if (dayCost > 0) {
+              transportTotal += dayCost * days;
+              const tollPart = route.toll > 0 ? `${route.tollName},` : '';
+              detailParts.push(`${route.label}:${tollPart}ガソリン代${route.km}km×15円=${gas.toLocaleString()}円計${dayCost.toLocaleString()}円×${days}日=${(dayCost * days).toLocaleString()}円`);
+            }
           } else if (!unknownLocations.includes(location)) {
             unknownLocations.push(location);
           }
