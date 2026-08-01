@@ -30,6 +30,17 @@ const STARK_RATES = {
   '梅下想菜': 16000,
 };
 
+// 請求書の品目に使う姓（原悠真のように姓が1文字のスタッフがいるため明示する）
+const SURNAMES = {
+  '村田雄哉': '村田',
+  '鮎川公彦': '鮎川',
+  '永島大夢': '永島',
+  '上原恵介': '上原',
+  '川﨑茉奈': '川﨑',
+  '原悠真': '原',
+  '梅下想菜': '梅下',
+};
+
 // 村田の店舗別交通費（往復km, 有料道路料金円/往復）
 // ds/DS = ドコモショップの略。表記ゆれはキーワードでマッチする
 const MURATA_ROUTES = [
@@ -107,7 +118,7 @@ app.get('/generate-invoice', async (req, res) => {
       const rate = STARK_RATES[staffName];
       if (!rate) return;
 
-      const surname = staffName.slice(0, 2);
+      const surname = SURNAMES[staffName] || staffName.slice(0, 2);
       let workDays = 0;
       let lastDay = 0;
       const locationCounts = {}; // 村田用：場所ごとの日数集計
