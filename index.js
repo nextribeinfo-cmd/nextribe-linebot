@@ -7,7 +7,9 @@ app.use(express.json());
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-const STAFF = [
+// スタッフ一覧はスプレッドシートの「設定」シートから読む。
+// 以下は設定シートが読めなかったときのフォールバックで、通常は使われない。
+const FALLBACK_STAFF = [
   { name: '村田雄哉',   start: 1, end: null },
   { name: '山崎龍之介', start: 1, end: null },
   { name: '光冨大輔',   start: 1, end: null },
@@ -17,7 +19,36 @@ const STAFF = [
   { name: '川﨑茉奈',   start: 1, end: null },
   { name: '原悠真',     start: 1, end: null },
   { name: '梅下想菜',   start: 1, end: null },
+  { name: '石川誠也',   start: 8, end: null },
 ];
+
+// 設定シート A列=スタッフ名 / B列=開始月 / C列=終了月（空白=在籍中）
+const STAFF_CACHE_MS = 5 * 60 * 1000;
+let staffCache = { at: 0, list: null };
+
+async function getStaff(sheets) {
+  if (staffCache.list && Date.now() - staffCache.at < STAFF_CACHE_MS) return staffCache.list;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: '設定!A3:C30',
+    });
+    const list = (res.data.values || [])
+      .filter(r => r[0] && String(r[0]).trim())
+      .map(r => ({
+        name: String(r[0]).trim(),
+        start: Number(r[1]) || 1,
+        end: (r[2] === undefined || String(r[2]).trim() === '') ? null : Number(r[2]),
+      }));
+    if (list.length > 0) {
+      staffCache = { at: Date.now(), list };
+      return list;
+    }
+  } catch (err) {
+    console.error('getStaff error:', err.message);
+  }
+  return FALLBACK_STAFF;
+}
 
 // スターク案件請求設定
 const STARK_RATES = {
@@ -28,6 +59,15 @@ const STARK_RATES = {
   '川﨑茉奈': 16000,
   '原悠真': 15000,
   '梅下想菜': 16000,
+  '石川誠也': 30000,
+};
+
+// 勤務先によって単価が変わるスタッフ（勤務先名にキーワードが含まれたらこの単価を使う）
+// 該当しない勤務先は STARK_RATES の単価を使う
+const STARK_LOCATION_RATES = {
+  '石川誠也': [
+    { keyword: 'テックランド時津', label: 'テックランド時津', rate: 26000 },
+  ],
 };
 
 // 請求書の品目に使う姓（原悠真のように姓が1文字のスタッフがいるため明示する）
@@ -39,6 +79,7 @@ const SURNAMES = {
   '川﨑茉奈': '川﨑',
   '原悠真': '原',
   '梅下想菜': '梅下',
+  '石川誠也': '石川',
 };
 
 // 村田の店舗別交通費（往復km, 有料道路料金円/往復）
@@ -119,9 +160,11 @@ app.get('/generate-invoice', async (req, res) => {
       if (!rate) return;
 
       const surname = SURNAMES[staffName] || staffName.slice(0, 2);
+      const rateRules = STARK_LOCATION_RATES[staffName] || [];
       let workDays = 0;
       let lastDay = 0;
       const locationCounts = {}; // 村田用：場所ごとの日数集計
+      const rateGroups = new Map(); // 単価ごとの日数（勤務先で単価が変わるスタッフ用）
 
       for (let col = 2; col < row.length; col++) {
         const location = row[col]?.trim();
@@ -129,6 +172,12 @@ app.get('/generate-invoice', async (req, res) => {
         const day = col - 2;
         workDays++;
         if (day > lastDay) lastDay = day;
+
+        const rule = rateRules.find(r => location.includes(r.keyword));
+        const key = rule ? rule.keyword : '';
+        const group = rateGroups.get(key) || { rate: rule ? rule.rate : rate, label: rule ? rule.label : '', days: 0 };
+        group.days++;
+        rateGroups.set(key, group);
 
         if (staffName === '村田雄哉') {
           locationCounts[location] = (locationCounts[location] || 0) + 1;
@@ -138,11 +187,17 @@ app.get('/generate-invoice', async (req, res) => {
       if (workDays === 0) return;
 
       const dd = String(lastDay).padStart(2, '0');
-      items.push({
-        name: `[${year}/${mm}/${dd} 納品分] ${surname}イベント稼動費`,
-        qty: workDays,
-        price: rate,
-      });
+      // 単価が1種類なら従来どおり1行。複数なら単価ごとに行を分け、勤務先名を品目に付ける
+      [...rateGroups.values()]
+        .sort((a, b) => b.rate - a.rate)
+        .forEach(group => {
+          const suffix = (rateGroups.size > 1 && group.label) ? `（${group.label}）` : '';
+          items.push({
+            name: `[${year}/${mm}/${dd} 納品分] ${surname}イベント稼動費${suffix}`,
+            qty: group.days,
+            price: group.rate,
+          });
+        });
 
       if (staffName === '村田雄哉') {
         let transportTotal = 0;
@@ -203,7 +258,23 @@ app.options('/generate-invoice', (req, res) => {
 });
 
 async function parseAndAddSchedule(message) {
-  const foundStaff = STAFF.find(s => message.includes(s.name));
+  let sheets;
+  try {
+    const auth = new google.auth.GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+    sheets = google.sheets({ version: 'v4', auth });
+  } catch (err) {
+    console.error(err);
+    return '❌ スプレッドシートに接続できませんでした。';
+  }
+
+  const staff = await getStaff(sheets);
+  // 部分一致で拾うため、より長い名前を優先する
+  const foundStaff = staff
+    .filter(s => message.includes(s.name))
+    .sort((a, b) => b.name.length - a.name.length)[0];
   if (!foundStaff) return '❌ スタッフ名が見つかりませんでした。\n\n例:\n村田雄哉の6月は6.7イオンモール佐賀大和、8.9.10ブランチ博多\n\n複数行でも可:\n村田雄哉の6月は\n6.7イオンモール佐賀大和\n8.9.10ブランチ博多';
 
   const monthMatch = message.match(/(\d+)月/);
@@ -216,12 +287,6 @@ async function parseAndAddSchedule(message) {
   let addedDetails = [];
 
   try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-    const sheets = google.sheets({ version: 'v4', auth });
-
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: `${month}月!A1:A20`,
