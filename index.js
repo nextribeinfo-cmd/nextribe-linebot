@@ -67,6 +67,7 @@ const STARK_RATES = {
 const STARK_LOCATION_RATES = {
   '石川誠也': [
     { keyword: 'テックランド時津', label: 'テックランド時津', rate: 26000 },
+    { keyword: '筑紫野',           label: 'イオンモール筑紫野', rate: 26000 },
   ],
 };
 
