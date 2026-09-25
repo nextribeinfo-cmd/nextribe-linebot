@@ -14,12 +14,13 @@ const FALLBACK_STAFF = [
   { name: '山崎龍之介', start: 1, end: null },
   { name: '光冨大輔',   start: 1, end: null },
   { name: '鮎川公彦',   start: 1, end: null },
-  { name: '永島大夢',   start: 1, end: null },
-  { name: '上原恵介',   start: 1, end: null },
+  { name: '永島大夢',   start: 1, end: 9 },
+  { name: '上原恵介',   start: 1, end: 9 },
   { name: '川﨑茉奈',   start: 1, end: null },
   { name: '原悠真',     start: 1, end: null },
-  { name: '梅下想菜',   start: 1, end: null },
+  { name: '梅下想菜',   start: 1, end: 9 },
   { name: '石川誠也',   start: 8, end: null },
+  { name: '山本拓弥',   start: 10, end: null },
 ];
 
 // 設定シート A列=スタッフ名 / B列=開始月 / C列=終了月（空白=在籍中）
@@ -60,6 +61,7 @@ const STARK_RATES = {
   '原悠真': 15000,
   '梅下想菜': 16000,
   '石川誠也': 30000,
+  '山本拓弥': 30000,
 };
 
 // 勤務先によって単価が変わるスタッフ（勤務先名にキーワードが含まれたらこの単価を使う）
@@ -81,6 +83,7 @@ const SURNAMES = {
   '原悠真': '原',
   '梅下想菜': '梅下',
   '石川誠也': '石川',
+  '山本拓弥': '山本',
 };
 
 // 村田の店舗別交通費（往復km, 有料道路料金円/往復）
@@ -281,6 +284,10 @@ async function parseAndAddSchedule(message) {
   const monthMatch = message.match(/(\d+)月/);
   if (!monthMatch) return '❌ 月が見つかりませんでした。';
   const month = parseInt(monthMatch[1]);
+  if (month < 1 || month > 12) return '❌ 月の指定が正しくありません。';
+  if (foundStaff.start > month || (foundStaff.end !== null && foundStaff.end < month)) {
+    return `❌ ${foundStaff.name}は${month}月の稼働対象外です。\n設定シートの開始月／終了月をご確認ください。`;
+  }
 
   const afterMonth = message.replace(/^.*?\d+月\D*/, '').trim();
   if (!afterMonth) return '❌ スケジュール内容が見つかりません。';
