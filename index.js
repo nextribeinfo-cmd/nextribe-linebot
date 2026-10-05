@@ -151,6 +151,7 @@ app.get('/generate-invoice', async (req, res) => {
       range: `${month}月!A1:AF20`,
     });
     const rows = result.data.values || [];
+    const dateHeader = rows.find(r => r[0]?.trim() === 'スタッフ名') || [];
 
     const year = new Date().getFullYear();
     const mm = String(month).padStart(2, '0');
@@ -173,7 +174,11 @@ app.get('/generate-invoice', async (req, res) => {
       for (let col = 2; col < row.length; col++) {
         const location = row[col]?.trim();
         if (!location) continue;
-        const day = col - 2;
+        // 自走化は別クライアントへの別請求なので、スターク請求には数えない
+        if (location.includes('自走化')) continue;
+        // C列(col=2)が1日。ヘッダー行の「9/1」から日を読み、読めなければ列位置から求める
+        const headerDay = parseInt((dateHeader[col] || '').split('/')[1]);
+        const day = headerDay || (col - 1);
         workDays++;
         if (day > lastDay) lastDay = day;
 
